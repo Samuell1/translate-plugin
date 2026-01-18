@@ -1,7 +1,6 @@
 <?php namespace RainLab\Translate\Traits;
 
 use Db;
-use Str;
 use DbDongle;
 use RainLab\Translate\Classes\Translator;
 use October\Rain\Html\Helper as HtmlHelper;
@@ -85,28 +84,31 @@ trait Translatable
 
         // Bind instance-level events
         $this->bindEvent('model.saveInternal', [$this, 'syncTranslatableAttributes']);
+    }
 
-        $this->bindEvent('model.beforeGetAttribute', function ($key) {
-            if ($this->isTranslatable($key)) {
-                $value = $this->getAttributeTranslated($key);
-                if ($this->hasGetMutator($key)) {
-                    $method = 'get' . Str::studly($key) . 'Attribute';
-                    $value = $this->{$method}($value);
-                }
-                return $value;
-            }
-        });
+    /**
+     * getAttribute overrides the parent method to return translated values.
+     */
+    public function getAttribute($key)
+    {
+        if ($this->isTranslatable($key)) {
+            return $this->getAttributeTranslated($key);
+        }
 
-        $this->bindEvent('model.beforeSetAttribute', function ($key, $value) {
-            if ($this->isTranslatable($key)) {
-                $value = $this->setAttributeTranslated($key, $value);
-                if ($this->hasSetMutator($key)) {
-                    $method = 'set' . Str::studly($key) . 'Attribute';
-                    $value = $this->{$method}($value);
-                }
-                return $value;
-            }
-        });
+        return parent::getAttribute($key);
+    }
+
+    /**
+     * setAttribute overrides the parent method to store translated values.
+     */
+    public function setAttribute($key, $value)
+    {
+        if ($this->isTranslatable($key)) {
+            $this->setAttributeTranslated($key, $value);
+            return $this;
+        }
+
+        return parent::setAttribute($key, $value);
     }
 
     /**

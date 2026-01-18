@@ -1,5 +1,6 @@
 <?php namespace RainLab\Translate\Traits;
 
+use Arr;
 use Db;
 use DbDongle;
 use RainLab\Translate\Classes\Translator;
@@ -254,7 +255,7 @@ trait Translatable
             $this->loadTranslatableData($locale);
         }
 
-        return array_get($this->translatableAttributes, $locale, []);
+        return Arr::get($this->translatableAttributes, $locale, []);
     }
 
     /**
@@ -693,7 +694,7 @@ trait Translatable
         if ($optionedAttributes = $this->getTranslatableAttributesWithOptions()) {
             foreach ($optionedAttributes as $attribute => $options) {
                 if (array_key_exists('fallback', $options) && $options['fallback'] === false) {
-                    $includeAttrs[$attribute] = array_get($data, $attribute);
+                    $includeAttrs[$attribute] = Arr::get($data, $attribute);
                 }
             }
         }
@@ -720,11 +721,11 @@ trait Translatable
         $data = $this->translatableAttributes[$locale];
 
         foreach ($optionedAttributes as $attribute => $options) {
-            if (!array_get($options, 'index', false)) {
+            if (!Arr::get($options, 'index', false)) {
                 continue;
             }
 
-            $value = array_get($data, $attribute);
+            $value = Arr::get($data, $attribute);
 
             $obj = Db::table('rainlab_translate_indexes')
                 ->where('locale', $locale)
@@ -785,7 +786,7 @@ trait Translatable
     {
         $keyArray = HtmlHelper::nameToArray($attribute);
 
-        return array_get($data, implode('.', $keyArray));
+        return Arr::get($data, implode('.', $keyArray));
     }
 
     /**
@@ -795,7 +796,7 @@ trait Translatable
     {
         $keyArray = HtmlHelper::nameToArray($attribute);
 
-        array_set($data, implode('.', $keyArray), $value);
+        Arr::set($data, implode('.', $keyArray), $value);
 
         return $value;
     }

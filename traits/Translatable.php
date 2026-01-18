@@ -21,53 +21,59 @@ use October\Rain\Html\Helper as HtmlHelper;
 trait Translatable
 {
     /**
-     * @var string Active language for translations.
+     * @var string|null Active language for translations.
      */
-    protected $translatableContext;
+    protected ?string $translatableContext = null;
 
     /**
-     * @var string Default system language.
+     * @var string|null Default system language.
      */
-    protected $translatableDefault;
+    protected ?string $translatableDefault = null;
 
     /**
      * @var bool Determines if empty translations should be replaced by default values.
      */
-    protected $translatableUseFallback = true;
+    protected bool $translatableUseFallback = true;
 
     /**
      * @var array Data store for translated attributes.
      */
-    protected $translatableAttributes = [];
+    protected array $translatableAttributes = [];
 
     /**
      * @var array Data store for original translated attributes.
      */
-    protected $translatableOriginals = [];
+    protected array $translatableOriginals = [];
+
+    /**
+     * @var array|null Cache for translatable attributes list.
+     */
+    protected ?array $translatableAttributesCache = null;
 
     /**
      * bootTranslatable boots the translatable trait for a model.
      */
-    public static function bootTranslatable()
+    public static function bootTranslatable(): void
     {
         static::extend(function ($model) {
-            // Add the translations morphMany relationship
             $model->morphMany['translations'] = [
                 \RainLab\Translate\Models\Attribute::class,
                 'name' => 'model'
             ];
         });
 
-        // Clean up indexes when this model is deleted
         static::deleted(function ($model) {
+            $modelKey = $model->getKey();
+            $modelType = get_class($model);
+
             Db::table('rainlab_translate_attributes')
-                ->where('model_id', $model->getKey())
-                ->where('model_type', get_class($model))
+                ->where('model_id', $modelKey)
+                ->where('model_type', $modelType)
                 ->delete();
 
             Db::table('rainlab_translate_indexes')
-                ->where('model_id', $model->getKey())
-                ->where('model_type', get_class($model))
+                ->where('model_id', $modelKey)
+                ->where('model_type', $modelType)
                 ->delete();
         });
     }
@@ -75,22 +81,20 @@ trait Translatable
     /**
      * initializeTranslatable initializes the translatable trait for a model instance.
      */
-    public function initializeTranslatable()
+    public function initializeTranslatable(): void
     {
         $this->initTranslatableContext();
 
-        // Replace file attachments with translatable ones
         $this->extendTranslatableFileModels('attachOne');
         $this->extendTranslatableFileModels('attachMany');
 
-        // Bind instance-level events
         $this->bindEvent('model.saveInternal', [$this, 'syncTranslatableAttributes']);
     }
 
     /**
      * getAttribute overrides the parent method to return translated values.
      */
-    public function getAttribute($key)
+    public function getAttribute($key): mixed
     {
         if ($this->isTranslatable($key)) {
             return $this->getAttributeTranslated($key);
@@ -102,7 +106,7 @@ trait Translatable
     /**
      * setAttribute overrides the parent method to store translated values.
      */
-    public function setAttribute($key, $value)
+    public function setAttribute($key, $value): mixed
     {
         if ($this->isTranslatable($key)) {
             $this->setAttributeTranslated($key, $value);
@@ -115,7 +119,7 @@ trait Translatable
     /**
      * initTranslatableContext initializes this class, sets the default language code to use.
      */
-    public function initTranslatableContext()
+    public function initTranslatableContext(): void
     {
         $translate = Translator::instance();
         $this->translatableContext = $translate->getLocale();
@@ -123,34 +127,32 @@ trait Translatable
     }
 
     /**
-     * extendTranslatableFileModels will swap the standard File model with MLFile instead
+     * extendTranslatableFileModels will swap the standard File model with MLFile instead.
      */
-    protected function extendTranslatableFileModels(string $relationGroup)
+    protected function extendTranslatableFileModels(string $relationGroup): void
     {
         if (!isset($this->$relationGroup) || !is_array($this->$relationGroup)) {
             return;
         }
 
+        $translatableAttrs = $this->getTranslatableAttributes();
+
         foreach ($this->$relationGroup as $relationName => $relationObj) {
             $relationClass = is_array($relationObj) ? $relationObj[0] : $relationObj;
 
-            // Custom implementation
             if ($relationClass !== \System\Models\File::class) {
                 continue;
             }
 
-            // Normalize definition
             if (!is_array($relationObj)) {
                 $relationObj = (array) $relationObj;
             }
 
-            // Translatable individual file models
-            if (in_array($relationName, $this->getTranslatableAttributes())) {
+            if (in_array($relationName, $translatableAttrs)) {
                 $relationObj['relationClass'] = $relationGroup === 'attachOne'
                     ? \RainLab\Translate\Classes\Relations\MLAttachOne::class
                     : \RainLab\Translate\Classes\Relations\MLAttachMany::class;
             }
-            // Translate file models attributes only
             else {
                 $relationObj[0] = \RainLab\Translate\Models\MLFile::class;
             }
@@ -160,9 +162,9 @@ trait Translatable
     }
 
     /**
-     * shouldTranslate determines if the context is applying translated values
+     * shouldTranslate determines if the context is applying translated values.
      */
-    public function shouldTranslate()
+    public function shouldTranslate(): bool
     {
         return $this->translatableContext !== $this->translatableDefault;
     }
@@ -170,7 +172,7 @@ trait Translatable
     /**
      * isTranslatable checks if an attribute should be translated or not.
      */
-    public function isTranslatable($key)
+    public function isTranslatable(string $key): bool
     {
         if ($key === 'translatable' || !$this->shouldTranslate()) {
             return false;
@@ -181,9 +183,8 @@ trait Translatable
 
     /**
      * noFallbackLocale disables translation fallback locale.
-     * @return self
      */
-    public function noFallbackLocale()
+    public function noFallbackLocale(): static
     {
         $this->translatableUseFallback = false;
 
@@ -192,9 +193,8 @@ trait Translatable
 
     /**
      * withFallbackLocale enables translation fallback locale.
-     * @return self
      */
-    public function withFallbackLocale()
+    public function withFallbackLocale(): static
     {
         $this->translatableUseFallback = true;
 
@@ -203,43 +203,30 @@ trait Translatable
 
     /**
      * getAttributeTranslated returns a translated attribute value.
-     *
-     * The base value must come from 'attributes' on the model otherwise the process
-     * can possibly loop back to this event, then method triggered by __get() magic.
      */
-    public function getAttributeTranslated($key, $locale = null)
+    public function getAttributeTranslated(string $key, ?string $locale = null): mixed
     {
-        if ($locale == null) {
-            $locale = $this->translatableContext;
+        $locale ??= $this->translatableContext;
+
+        if ($locale === $this->translatableDefault) {
+            return $this->getTranslatableAttributeFromData($this->attributes, $key);
         }
 
-        // Result should not return NULL to successfully hook beforeGetAttribute event
-        $result = '';
+        if (!array_key_exists($locale, $this->translatableAttributes)) {
+            $this->loadTranslatableData($locale);
+        }
 
-        // Default locale
-        if ($locale == $this->translatableDefault) {
+        if ($this->hasTranslation($key, $locale)) {
+            $result = $this->getTranslatableAttributeFromData($this->translatableAttributes[$locale], $key);
+        }
+        elseif ($this->translatableUseFallback) {
             $result = $this->getTranslatableAttributeFromData($this->attributes, $key);
         }
-        // Other locale
         else {
-            if (!array_key_exists($locale, $this->translatableAttributes)) {
-                $this->loadTranslatableData($locale);
-            }
-
-            if ($this->hasTranslation($key, $locale)) {
-                $result = $this->getTranslatableAttributeFromData($this->translatableAttributes[$locale], $key);
-            }
-            elseif ($this->translatableUseFallback) {
-                $result = $this->getTranslatableAttributeFromData($this->attributes, $key);
-            }
+            $result = '';
         }
 
-        // Handle jsonable attributes, default locale may return the value as a string
-        if (
-            is_string($result) &&
-            method_exists($this, 'isJsonable') &&
-            $this->isJsonable($key)
-        ) {
+        if (is_string($result) && method_exists($this, 'isJsonable') && $this->isJsonable($key)) {
             $result = json_decode($result, true);
         }
 
@@ -249,50 +236,43 @@ trait Translatable
     /**
      * getTranslateAttributes returns all translated attribute values.
      */
-    public function getTranslateAttributes($locale)
+    public function getTranslateAttributes(string $locale): array
     {
         if (!array_key_exists($locale, $this->translatableAttributes)) {
             $this->loadTranslatableData($locale);
         }
 
-        return Arr::get($this->translatableAttributes, $locale, []);
+        return $this->translatableAttributes[$locale] ?? [];
     }
 
     /**
-     * hasTranslation returns whether the attribute is translatable (has a translation) for the given locale.
+     * hasTranslation returns whether the attribute has a translation for the given locale.
      */
-    public function hasTranslation($key, $locale)
+    public function hasTranslation(string $key, string $locale): bool
     {
-        // If the default locale is passed, the attributes are retrieved from the model,
-        // otherwise fetch the attributes from the $translatableAttributes property
-        if ($locale == $this->translatableDefault) {
+        if ($locale === $this->translatableDefault) {
             $translatableAttributes = $this->attributes;
         }
         else {
-            // Ensure that the translatableData has been loaded
             if (!isset($this->translatableAttributes[$locale])) {
                 $this->loadTranslatableData($locale);
             }
-
             $translatableAttributes = $this->translatableAttributes[$locale];
         }
 
         $value = $this->getTranslatableAttributeFromData($translatableAttributes, $key);
 
-        // Checkboxes can use zero values
-        return !!$value || $value === 0 || $value === '0';
+        return $value !== null && $value !== '' || $value === 0 || $value === '0';
     }
 
     /**
      * setAttributeTranslated sets a translated attribute value.
      */
-    public function setAttributeTranslated($key, $value, $locale = null)
+    public function setAttributeTranslated(string $key, mixed $value, ?string $locale = null): mixed
     {
-        if ($locale == null) {
-            $locale = $this->translatableContext;
-        }
+        $locale ??= $this->translatableContext;
 
-        if ($locale == $this->translatableDefault) {
+        if ($locale === $this->translatableDefault) {
             return $this->setTranslatableAttributeFromData($this->attributes, $key, $value);
         }
 
@@ -304,55 +284,46 @@ trait Translatable
     }
 
     /**
-     * syncTranslatableAttributes restores the default language values on the model and
-     * stores the translated values in the attributes table.
+     * syncTranslatableAttributes restores the default language values on the model
+     * and stores the translated values in the attributes table.
      */
-    public function syncTranslatableAttributes()
+    public function syncTranslatableAttributes(): void
     {
-        // Spin through the known locales, store the translations if necessary
-        $knownLocales = array_keys($this->translatableAttributes);
-        foreach ($knownLocales as $locale) {
-            if (!$this->isTranslateDirty(null, $locale)) {
-                continue;
+        foreach (array_keys($this->translatableAttributes) as $locale) {
+            if ($this->isTranslateDirty(null, $locale)) {
+                $this->storeTranslatableData($locale);
             }
-
-            $this->storeTranslatableData($locale);
         }
 
-        // Saving the default locale, no need to restore anything
         if (!$this->shouldTranslate()) {
             return;
         }
 
-        // Restore translatable values to models originals
         $original = $this->getOriginal();
-        $attributes = $this->getAttributes();
         $translatable = $this->getTranslatableAttributes();
         $originalValues = array_intersect_key($original, array_flip($translatable));
-        $this->attributes = array_merge($attributes, $originalValues);
+        $this->attributes = array_merge($this->getAttributes(), $originalValues);
     }
 
     /**
-     * translateContext changes the active language for this model
+     * translateContext changes the active language for this model.
      */
-    public function translateContext($context = null)
+    public function translateContext(?string $context = null): ?string
     {
         if ($context === null) {
             return $this->translatableContext;
         }
 
-        if ($context !== null) {
-            $this->reloadTranslatableRelations();
-        }
-
+        $this->reloadTranslatableRelations();
         $this->translatableContext = $context;
+
+        return null;
     }
 
     /**
      * lang is a shorthand for translateContext method, and chainable.
-     * @return self
      */
-    public function lang($context = null)
+    public function lang(?string $context = null): static
     {
         $this->translateContext($context);
 
@@ -360,17 +331,18 @@ trait Translatable
     }
 
     /**
-     * reloadTranslatableRelations reloads relations when the context changes
+     * reloadTranslatableRelations reloads relations when the context changes.
      */
-    public function reloadTranslatableRelations()
+    public function reloadTranslatableRelations(): void
     {
         $loadedRelations = $this->getRelations();
-        if (!$loadedRelations) {
+        if (empty($loadedRelations)) {
             return;
         }
 
+        $translatableAttrs = $this->getTranslatableAttributes();
         foreach ($loadedRelations as $relationName => $value) {
-            if (in_array($relationName, $this->getTranslatableAttributes())) {
+            if (in_array($relationName, $translatableAttrs)) {
                 $this->reloadRelations($relationName);
             }
         }
@@ -379,34 +351,36 @@ trait Translatable
     /**
      * hasTranslatableAttributes checks if this model has translatable attributes.
      */
-    public function hasTranslatableAttributes()
+    public function hasTranslatableAttributes(): bool
     {
-        return is_array($this->translatable) &&
-            count($this->translatable) > 0;
+        return is_array($this->translatable) && count($this->translatable) > 0;
     }
 
     /**
-     * getTranslatableAttributes returns a collection of fields that will be hashed.
+     * getTranslatableAttributes returns a collection of translatable field names.
      */
-    public function getTranslatableAttributes()
+    public function getTranslatableAttributes(): array
     {
-        $translatable = [];
+        if ($this->translatableAttributesCache !== null) {
+            return $this->translatableAttributesCache;
+        }
 
         if (!is_array($this->translatable)) {
-            return [];
+            return $this->translatableAttributesCache = [];
         }
 
+        $translatable = [];
         foreach ($this->translatable as $attribute) {
-            $translatable[] = is_array($attribute) ? array_shift($attribute) : $attribute;
+            $translatable[] = is_array($attribute) ? array_key_first($attribute) ?? $attribute[0] : $attribute;
         }
 
-        return $translatable;
+        return $this->translatableAttributesCache = $translatable;
     }
 
     /**
-     * getTranslatableAttributesWithOptions returns the defined options for a translatable attribute.
+     * getTranslatableAttributesWithOptions returns the defined options for translatable attributes.
      */
-    public function getTranslatableAttributesWithOptions()
+    public function getTranslatableAttributesWithOptions(): array
     {
         $attributes = [];
 
@@ -415,7 +389,10 @@ trait Translatable
                 continue;
             }
 
-            $attributeName = array_shift($options);
+            $attributeName = array_key_first($options) ?? array_shift($options);
+            if (is_int($attributeName)) {
+                $attributeName = array_shift($options);
+            }
 
             $attributes[$attributeName] = $options;
         }
@@ -426,26 +403,25 @@ trait Translatable
     /**
      * isTranslateDirty determines if the model or a given translated attribute has been modified.
      */
-    public function isTranslateDirty($attribute = null, $locale = null)
+    public function isTranslateDirty(?string $attribute = null, ?string $locale = null): bool
     {
         $dirty = $this->getTranslateDirty($locale);
 
-        if (is_null($attribute)) {
+        if ($attribute === null) {
             return count($dirty) > 0;
         }
-        else {
-            return array_key_exists($attribute, $dirty);
-        }
+
+        return array_key_exists($attribute, $dirty);
     }
 
     /**
-     * getDirtyLocales returns locales that have changed, if any
+     * getDirtyLocales returns locales that have changed, if any.
      */
-    public function getDirtyLocales()
+    public function getDirtyLocales(): array
     {
         $dirtyLocales = [];
-        $knownLocales = array_keys($this->translatableAttributes);
-        foreach ($knownLocales as $locale) {
+
+        foreach (array_keys($this->translatableAttributes) as $locale) {
             if ($this->isTranslateDirty(null, $locale)) {
                 $dirtyLocales[] = $locale;
             }
@@ -457,40 +433,35 @@ trait Translatable
     /**
      * getTranslatableOriginals gets the original values of the translated attributes.
      */
-    public function getTranslatableOriginals($locale = null)
+    public function getTranslatableOriginals(?string $locale = null): ?array
     {
-        if (!$locale) {
+        if ($locale === null) {
             return $this->translatableOriginals;
         }
-        else {
-            return $this->translatableOriginals[$locale] ?? null;
-        }
+
+        return $this->translatableOriginals[$locale] ?? null;
     }
 
     /**
      * getTranslateDirty gets the translated attributes that have been changed since last sync.
      */
-    public function getTranslateDirty($locale = null)
+    public function getTranslateDirty(?string $locale = null): array
     {
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
+        $locale ??= $this->translatableContext;
 
         if (!array_key_exists($locale, $this->translatableAttributes)) {
             return [];
         }
 
-        // All dirty
         if (!array_key_exists($locale, $this->translatableOriginals)) {
             return $this->translatableAttributes[$locale];
         }
 
         $dirty = [];
+        $originals = $this->translatableOriginals[$locale];
+
         foreach ($this->translatableAttributes[$locale] as $key => $value) {
-            if (!array_key_exists($key, $this->translatableOriginals[$locale])) {
-                $dirty[$key] = $value;
-            }
-            elseif ($value != $this->translatableOriginals[$locale][$key]) {
+            if (!array_key_exists($key, $originals) || $value != $originals[$key]) {
                 $dirty[$key] = $value;
             }
         }
@@ -501,57 +472,41 @@ trait Translatable
     /**
      * scopeTransWhere applies a translatable index to a basic query.
      */
-    public function scopeTransWhere($query, $index, $value, $locale = null, $operator = '=')
+    public function scopeTransWhere($query, string $index, mixed $value, ?string $locale = null, string $operator = '=')
     {
-        return $this->transWhereInternal($query, $index, $value, [
-            'locale' => $locale,
-            'operator' => $operator
-        ]);
+        return $this->transWhereInternal($query, $index, $value, $locale, $operator, false);
     }
 
     /**
      * scopeTransWhereNoFallback is identical to scopeTransWhere except it will not
      * use a fallback query when there are no indexes found.
      */
-    public function scopeTransWhereNoFallback($query, $index, $value, $locale = null, $operator = '=')
+    public function scopeTransWhereNoFallback($query, string $index, mixed $value, ?string $locale = null, string $operator = '=')
     {
-        // Ignore translatable indexes in default locale context
-        if (($locale ?: $this->translatableContext) === $this->translatableDefault) {
+        $locale ??= $this->translatableContext;
+
+        if ($locale === $this->translatableDefault) {
             return $query->where($index, $operator, $value);
         }
 
-        return $this->transWhereInternal($query, $index, $value, [
-            'locale' => $locale,
-            'operator' => $operator,
-            'noFallback' => true
-        ]);
+        return $this->transWhereInternal($query, $index, $value, $locale, $operator, true);
     }
 
     /**
-     * transWhereInternal
+     * transWhereInternal handles the internal logic for translation where queries.
      */
-    protected function transWhereInternal($query, $index, $value, $options = [])
+    protected function transWhereInternal($query, string $index, mixed $value, ?string $locale, string $operator, bool $noFallback)
     {
-        extract(array_merge([
-            'locale' => null,
-            'operator' => '=',
-            'noFallback' => false
-        ], $options));
+        $locale ??= $this->translatableContext;
 
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
-
-        // Separate query into two separate queries for improved performance
         $translateIndexes = Db::table('rainlab_translate_indexes')
-            ->where('rainlab_translate_indexes.model_type', '=', $this->getTranslatableModelClass())
-            ->where('rainlab_translate_indexes.locale', '=', $locale)
-            ->where('rainlab_translate_indexes.item', $index)
-            ->where('rainlab_translate_indexes.value', $operator, $value)
-            ->pluck('model_id')
-        ;
+            ->where('model_type', $this->getTranslatableModelClass())
+            ->where('locale', $locale)
+            ->where('item', $index)
+            ->where('value', $operator, $value)
+            ->pluck('model_id');
 
-        if ($translateIndexes->count() || $noFallback) {
+        if ($translateIndexes->isNotEmpty() || $noFallback) {
             $query->whereIn($this->getQualifiedKeyName(), $translateIndexes);
         }
         else {
@@ -564,16 +519,15 @@ trait Translatable
     /**
      * scopeTransOrderBy applies a sort operation with a translatable index to a basic query.
      */
-    public function scopeTransOrderBy($query, $index, $direction = 'asc', $locale = null)
+    public function scopeTransOrderBy($query, string $index, string $direction = 'asc', ?string $locale = null)
     {
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
+        $locale ??= $this->translatableContext;
         $indexTableAlias = 'rainlab_translate_indexes_' . $index . '_' . $locale;
+        $table = $this->getTable();
 
         $query->select(
-            $this->getTable().'.*',
-            Db::raw('COALESCE(' . $indexTableAlias . '.value, '. $this->getTable() .'.'.$index.') AS translate_sorting_key')
+            $table . '.*',
+            Db::raw("COALESCE({$indexTableAlias}.value, {$table}.{$index}) AS translate_sorting_key")
         );
 
         $query->orderBy('translate_sorting_key', $direction);
@@ -586,47 +540,40 @@ trait Translatable
     /**
      * joinTranslateIndexesTable joins the translatable indexes table to a query.
      */
-    protected function joinTranslateIndexesTable($query, $locale, $index, $indexTableAlias)
+    protected function joinTranslateIndexesTable($query, string $locale, string $index, string $indexTableAlias): void
     {
         $joinTableWithAlias = 'rainlab_translate_indexes as ' . $indexTableAlias;
-        // check if table with same name and alias is already joined
-        if (collect($query->getQuery()->joins)->contains('table', $joinTableWithAlias)) {
-            return $query;
+
+        $joins = $query->getQuery()->joins ?? [];
+        foreach ($joins as $join) {
+            if ($join->table === $joinTableWithAlias) {
+                return;
+            }
         }
 
-        $query->leftJoin($joinTableWithAlias, function($join) use ($locale, $index, $indexTableAlias) {
+        $query->leftJoin($joinTableWithAlias, function ($join) use ($locale, $index, $indexTableAlias) {
             $join
                 ->on(Db::raw(DbDongle::cast($this->getQualifiedKeyName(), 'TEXT')), '=', $indexTableAlias . '.model_id')
                 ->where($indexTableAlias . '.model_type', '=', $this->getTranslatableModelClass())
                 ->where($indexTableAlias . '.item', '=', $index)
                 ->where($indexTableAlias . '.locale', '=', $locale);
         });
-
-        return $query;
     }
 
     /**
      * storeTranslatableData saves the translation data in the join table.
      */
-    protected function storeTranslatableData($locale = null)
+    protected function storeTranslatableData(?string $locale = null): void
     {
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
+        $locale ??= $this->translatableContext;
 
-        // Model doesn't exist yet, defer this logic in memory
         if (!$this->exists) {
-            $this->bindEventOnce('model.afterCreate', function() use ($locale) {
+            $this->bindEventOnce('model.afterCreate', function () use ($locale) {
                 $this->storeTranslatableData($locale);
             });
-
             return;
         }
 
-        /**
-         * @event model.translate.resolveComputedFields
-         * Resolve computed fields before saving
-         */
         $computedFields = $this->fireEvent('model.translate.resolveComputedFields', [$locale], true);
         if (is_array($computedFields)) {
             $this->translatableAttributes[$locale] = array_merge($this->translatableAttributes[$locale], $computedFields);
@@ -635,7 +582,6 @@ trait Translatable
         $this->storeTranslatableBasicData($locale);
         $this->storeTranslatableIndexData($locale);
 
-        // Trigger event workflow
         if ($this->usesTimestamps()) {
             $this->updateTimestamps();
         }
@@ -644,65 +590,58 @@ trait Translatable
     /**
      * storeTranslatableBasicData saves the basic translation data in the join table.
      */
-    protected function storeTranslatableBasicData($locale = null)
+    protected function storeTranslatableBasicData(string $locale): void
     {
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
+        $data = $this->getUniqueTranslatableData($locale, (array) $this->translatableAttributes[$locale]);
+        $encodedData = json_encode($data, JSON_UNESCAPED_UNICODE);
+        $modelKey = $this->getKey();
+        $modelType = $this->getTranslatableModelClass();
 
-        $data = (array) $this->translatableAttributes[$locale];
-
-        $data = $this->getUniqueTranslatableData($locale, $data);
-
-        $data = json_encode($data, JSON_UNESCAPED_UNICODE);
-
-        $obj = Db::table('rainlab_translate_attributes')
+        $exists = Db::table('rainlab_translate_attributes')
             ->where('locale', $locale)
-            ->where('model_id', $this->getKey())
-            ->where('model_type', $this->getTranslatableModelClass());
+            ->where('model_id', $modelKey)
+            ->where('model_type', $modelType)
+            ->exists();
 
-        if ($obj->count() > 0) {
-            $obj->update(['attribute_data' => $data]);
+        if ($exists) {
+            Db::table('rainlab_translate_attributes')
+                ->where('locale', $locale)
+                ->where('model_id', $modelKey)
+                ->where('model_type', $modelType)
+                ->update(['attribute_data' => $encodedData]);
         }
         else {
             Db::table('rainlab_translate_attributes')->insert([
                 'locale' => $locale,
-                'model_id' => $this->getKey(),
-                'model_type' => $this->getTranslatableModelClass(),
-                'attribute_data' => $data
+                'model_id' => $modelKey,
+                'model_type' => $modelType,
+                'attribute_data' => $encodedData
             ]);
         }
     }
 
     /**
-     * getUniqueTranslatableData returns data that differs with the default locale
+     * getUniqueTranslatableData returns data that differs with the default locale.
      */
-    protected function getUniqueTranslatableData($locale, array $data): array
+    protected function getUniqueTranslatableData(string $locale, array $data): array
     {
         $originalContext = $this->translateContext();
-
         $originalAttrs = $this->attributes;
 
         $this->translateContext($locale);
-
         $this->forceFill($data);
 
-        // Only include attributes that are different from the parent
         $includeAttrs = $this->getDirty();
 
-        // Or attributes that are requested via [fallback => false]
-        if ($optionedAttributes = $this->getTranslatableAttributesWithOptions()) {
-            foreach ($optionedAttributes as $attribute => $options) {
-                if (array_key_exists('fallback', $options) && $options['fallback'] === false) {
-                    $includeAttrs[$attribute] = Arr::get($data, $attribute);
-                }
+        foreach ($this->getTranslatableAttributesWithOptions() as $attribute => $options) {
+            if (($options['fallback'] ?? true) === false) {
+                $includeAttrs[$attribute] = Arr::get($data, $attribute);
             }
         }
 
         $data = array_intersect_key($data, $includeAttrs);
 
         $this->translateContext($originalContext);
-
         $this->attributes = $originalAttrs;
 
         return $data;
@@ -711,45 +650,56 @@ trait Translatable
     /**
      * storeTranslatableIndexData saves the indexed translation data in the join table.
      */
-    protected function storeTranslatableIndexData($locale = null)
+    protected function storeTranslatableIndexData(string $locale): void
     {
         $optionedAttributes = $this->getTranslatableAttributesWithOptions();
-        if (!count($optionedAttributes)) {
+        if (empty($optionedAttributes)) {
             return;
         }
 
         $data = $this->translatableAttributes[$locale];
+        $modelKey = $this->getKey();
+        $modelType = $this->getTranslatableModelClass();
 
         foreach ($optionedAttributes as $attribute => $options) {
-            if (!Arr::get($options, 'index', false)) {
+            if (empty($options['index'])) {
                 continue;
             }
 
             $value = Arr::get($data, $attribute);
 
-            $obj = Db::table('rainlab_translate_indexes')
+            $exists = Db::table('rainlab_translate_indexes')
                 ->where('locale', $locale)
-                ->where('model_id', $this->getKey())
-                ->where('model_type', $this->getTranslatableModelClass())
-                ->where('item', $attribute);
+                ->where('model_id', $modelKey)
+                ->where('model_type', $modelType)
+                ->where('item', $attribute)
+                ->exists();
 
-            $recordExists = $obj->count() > 0;
-
-            if (!strlen($value)) {
-                if ($recordExists) {
-                    $obj->delete();
+            if ($value === null || $value === '') {
+                if ($exists) {
+                    Db::table('rainlab_translate_indexes')
+                        ->where('locale', $locale)
+                        ->where('model_id', $modelKey)
+                        ->where('model_type', $modelType)
+                        ->where('item', $attribute)
+                        ->delete();
                 }
                 continue;
             }
 
-            if ($recordExists) {
-                $obj->update(['value' => $value]);
+            if ($exists) {
+                Db::table('rainlab_translate_indexes')
+                    ->where('locale', $locale)
+                    ->where('model_id', $modelKey)
+                    ->where('model_type', $modelType)
+                    ->where('item', $attribute)
+                    ->update(['value' => $value]);
             }
             else {
                 Db::table('rainlab_translate_indexes')->insert([
                     'locale' => $locale,
-                    'model_id' => $this->getKey(),
-                    'model_type' => $this->getTranslatableModelClass(),
+                    'model_id' => $modelKey,
+                    'model_type' => $modelType,
                     'item' => $attribute,
                     'value' => $value
                 ]);
@@ -760,21 +710,17 @@ trait Translatable
     /**
      * loadTranslatableData loads the translation data from the join table.
      */
-    protected function loadTranslatableData($locale = null)
+    protected function loadTranslatableData(?string $locale = null): array
     {
-        if (!$locale) {
-            $locale = $this->translatableContext;
-        }
+        $locale ??= $this->translatableContext;
 
         if (!$this->exists) {
             return $this->translatableAttributes[$locale] = [];
         }
 
-        $obj = $this->translations->first(function ($value, $key) use ($locale) {
-            return $value->attributes['locale'] === $locale;
-        });
+        $translation = $this->translations->first(fn ($item) => $item->locale === $locale);
 
-        $result = (array) ($obj ? json_decode($obj->attribute_data, true) : []);
+        $result = $translation ? (array) json_decode($translation->attribute_data, true) : [];
 
         return $this->translatableOriginals[$locale] = $this->translatableAttributes[$locale] = $result;
     }
@@ -782,7 +728,7 @@ trait Translatable
     /**
      * getTranslatableAttributeFromData extracts an attribute from a model/array with nesting support.
      */
-    protected function getTranslatableAttributeFromData($data, $attribute)
+    protected function getTranslatableAttributeFromData(array $data, string $attribute): mixed
     {
         $keyArray = HtmlHelper::nameToArray($attribute);
 
@@ -792,7 +738,7 @@ trait Translatable
     /**
      * setTranslatableAttributeFromData sets an attribute from a model/array with nesting support.
      */
-    protected function setTranslatableAttributeFromData(&$data, $attribute, $value)
+    protected function setTranslatableAttributeFromData(array &$data, string $attribute, mixed $value): mixed
     {
         $keyArray = HtmlHelper::nameToArray($attribute);
 
@@ -802,10 +748,9 @@ trait Translatable
     }
 
     /**
-     * getTranslatableModelClass returns the class name of the model. Takes any
-     * custom morphMap aliases into account.
+     * getTranslatableModelClass returns the class name of the model.
      */
-    protected function getTranslatableModelClass()
+    protected function getTranslatableModelClass(): string
     {
         return $this->getMorphClass();
     }

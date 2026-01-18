@@ -1,0 +1,29 @@
+{
+    "$schema": "https://phpbench.readthedocs.io/en/latest/phpbench.schema.json",
+    "runner.bootstrap": "vendor/autoload.php",
+    "runner.path": "tests/benchmarks",
+    "runner.php_config": {
+        "memory_limit": "512M"
+    },
+    "report.generators": {
+        "summary": {
+            "generator": "component",
+            "partition": ["benchmark_name"],
+            "components": [
+                {
+                    "component": "table_aggregate",
+                    "title": "Translation Loading Benchmarks",
+                    "partition": ["subject_name"],
+                    "row": {
+                        "benchmark": "first(subject_name)",
+                        "best": "min(result_time_avg) as time",
+                        "worst": "max(result_time_avg) as time",
+                        "mean": "mean(result_time_avg) as time",
+                        "stdev": "stdev(result_time_avg) as time",
+                        "mem_peak": "max(result_mem_peak) as memory"
+                    }
+                }
+            ]
+        }
+    }
+}

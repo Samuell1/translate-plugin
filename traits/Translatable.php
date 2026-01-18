@@ -46,45 +46,16 @@ trait Translatable
     protected array $translatableOriginals = [];
 
     /**
-     * @var bool Flag for auto-loading translations with every query.
+     * @var bool|null Flag for auto-loading translations on this model instance (overrides global).
      */
-    protected static bool $autoloadTranslations = false;
-
-    /**
-     * @var bool|null Flag for auto-loading translations on this model (overrides static).
-     */
-    protected ?bool $instanceAutoloadTranslations = null;
-
-    /**
-     * enableAutoloadTranslations globally enables auto-loading of translations.
-     */
-    public static function enableAutoloadTranslations(): void
-    {
-        static::$autoloadTranslations = true;
-    }
-
-    /**
-     * disableAutoloadTranslations globally disables auto-loading of translations.
-     */
-    public static function disableAutoloadTranslations(): void
-    {
-        static::$autoloadTranslations = false;
-    }
-
-    /**
-     * isAutoloadTranslations checks if auto-loading is enabled.
-     */
-    public static function isAutoloadTranslations(): bool
-    {
-        return static::$autoloadTranslations;
-    }
+    protected ?bool $autoloadTranslations = null;
 
     /**
      * setAutoloadTranslations sets auto-loading for this model instance.
      */
-    public function setAutoloadTranslations(bool $autoload): static
+    public function setAutoloadTranslations(?bool $autoload): static
     {
-        $this->instanceAutoloadTranslations = $autoload;
+        $this->autoloadTranslations = $autoload;
 
         return $this;
     }
@@ -113,8 +84,8 @@ trait Translatable
         static::addGlobalScope('translatable.autoload', function ($query) {
             $model = $query->getModel();
 
-            // Check instance override first, then static setting
-            $autoload = $model->instanceAutoloadTranslations ?? static::$autoloadTranslations;
+            // Check instance override first, then global Translator setting
+            $autoload = $model->autoloadTranslations ?? Translator::instance()->isAutoloadTranslations();
 
             if ($autoload) {
                 $query->withTranslation();

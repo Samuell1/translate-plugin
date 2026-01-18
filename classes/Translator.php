@@ -41,6 +41,35 @@ class Translator
     protected $isConfigured;
 
     /**
+     * @var bool Flag for auto-loading translations globally.
+     */
+    protected bool $autoloadTranslations = false;
+
+    /**
+     * enableAutoloadTranslations globally enables auto-loading of translations.
+     */
+    public function enableAutoloadTranslations(): void
+    {
+        $this->autoloadTranslations = true;
+    }
+
+    /**
+     * disableAutoloadTranslations globally disables auto-loading of translations.
+     */
+    public function disableAutoloadTranslations(): void
+    {
+        $this->autoloadTranslations = false;
+    }
+
+    /**
+     * isAutoloadTranslations checks if auto-loading is enabled globally.
+     */
+    public function isAutoloadTranslations(): bool
+    {
+        return $this->autoloadTranslations;
+    }
+
+    /**
      * Initialize the singleton
      * @return void
      */

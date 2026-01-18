@@ -46,6 +46,58 @@ trait Translatable
     protected array $translatableOriginals = [];
 
     /**
+     * @var bool Flag for auto-loading translations with every query.
+     */
+    protected static bool $autoloadTranslations = false;
+
+    /**
+     * @var bool|null Flag for auto-loading translations on this model (overrides static).
+     */
+    protected ?bool $instanceAutoloadTranslations = null;
+
+    /**
+     * enableAutoloadTranslations globally enables auto-loading of translations.
+     */
+    public static function enableAutoloadTranslations(): void
+    {
+        static::$autoloadTranslations = true;
+    }
+
+    /**
+     * disableAutoloadTranslations globally disables auto-loading of translations.
+     */
+    public static function disableAutoloadTranslations(): void
+    {
+        static::$autoloadTranslations = false;
+    }
+
+    /**
+     * isAutoloadTranslations checks if auto-loading is enabled.
+     */
+    public static function isAutoloadTranslations(): bool
+    {
+        return static::$autoloadTranslations;
+    }
+
+    /**
+     * setAutoloadTranslations sets auto-loading for this model instance.
+     */
+    public function setAutoloadTranslations(bool $autoload): static
+    {
+        $this->instanceAutoloadTranslations = $autoload;
+
+        return $this;
+    }
+
+    /**
+     * scopeWithoutAutoloadTranslations disables auto-loading for this query.
+     */
+    public function scopeWithoutAutoloadTranslations($query)
+    {
+        return $query->withoutGlobalScope('translatable.autoload');
+    }
+
+    /**
      * bootTranslatable boots the translatable trait for a model.
      */
     public static function bootTranslatable(): void
@@ -55,6 +107,18 @@ trait Translatable
                 \RainLab\Translate\Models\Attribute::class,
                 'name' => 'model'
             ];
+        });
+
+        // Add global scope for auto-loading translations
+        static::addGlobalScope('translatable.autoload', function ($query) {
+            $model = $query->getModel();
+
+            // Check instance override first, then static setting
+            $autoload = $model->instanceAutoloadTranslations ?? static::$autoloadTranslations;
+
+            if ($autoload) {
+                $query->withTranslation();
+            }
         });
 
         static::deleted(function ($model) {
@@ -530,6 +594,29 @@ trait Translatable
         $this->joinTranslateIndexesTable($query, $locale, $index, $indexTableAlias);
 
         return $query;
+    }
+
+    /**
+     * scopeWithTranslation eager loads translation for the current locale only.
+     * This is more performant than loading all translations when you only need one locale.
+     */
+    public function scopeWithTranslation($query)
+    {
+        $locale = $this->translatableContext ?? Translator::instance()->getLocale();
+        $fallback = $this->translatableDefault ?? Translator::instance()->getDefaultLocale();
+
+        return $query->with(['translations' => function ($q) use ($locale, $fallback) {
+            $q->whereIn('locale', array_unique([$locale, $fallback]));
+        }]);
+    }
+
+    /**
+     * scopeWithTranslations eager loads all translations.
+     * Use this when you need access to multiple locales.
+     */
+    public function scopeWithTranslations($query)
+    {
+        return $query->with('translations');
     }
 
     /**

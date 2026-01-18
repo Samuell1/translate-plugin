@@ -46,11 +46,6 @@ trait Translatable
     protected array $translatableOriginals = [];
 
     /**
-     * @var array|null Cache for translatable attributes list.
-     */
-    protected ?array $translatableAttributesCache = null;
-
-    /**
      * bootTranslatable boots the translatable trait for a model.
      */
     public static function bootTranslatable(): void
@@ -361,20 +356,18 @@ trait Translatable
      */
     public function getTranslatableAttributes(): array
     {
-        if ($this->translatableAttributesCache !== null) {
-            return $this->translatableAttributesCache;
-        }
+        return once(function () {
+            if (!is_array($this->translatable)) {
+                return [];
+            }
 
-        if (!is_array($this->translatable)) {
-            return $this->translatableAttributesCache = [];
-        }
+            $translatable = [];
+            foreach ($this->translatable as $attribute) {
+                $translatable[] = is_array($attribute) ? array_key_first($attribute) ?? $attribute[0] : $attribute;
+            }
 
-        $translatable = [];
-        foreach ($this->translatable as $attribute) {
-            $translatable[] = is_array($attribute) ? array_key_first($attribute) ?? $attribute[0] : $attribute;
-        }
-
-        return $this->translatableAttributesCache = $translatable;
+            return $translatable;
+        });
     }
 
     /**
@@ -382,22 +375,24 @@ trait Translatable
      */
     public function getTranslatableAttributesWithOptions(): array
     {
-        $attributes = [];
+        return once(function () {
+            $attributes = [];
 
-        foreach ($this->translatable as $options) {
-            if (!is_array($options)) {
-                continue;
+            foreach ($this->translatable as $options) {
+                if (!is_array($options)) {
+                    continue;
+                }
+
+                $attributeName = array_key_first($options) ?? array_shift($options);
+                if (is_int($attributeName)) {
+                    $attributeName = array_shift($options);
+                }
+
+                $attributes[$attributeName] = $options;
             }
 
-            $attributeName = array_key_first($options) ?? array_shift($options);
-            if (is_int($attributeName)) {
-                $attributeName = array_shift($options);
-            }
-
-            $attributes[$attributeName] = $options;
-        }
-
-        return $attributes;
+            return $attributes;
+        });
     }
 
     /**

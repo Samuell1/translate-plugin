@@ -25,5 +25,10 @@
     "require-dev": {
         "phpbench/phpbench": "^1.2"
     },
-    "minimum-stability": "dev"
+    "minimum-stability": "dev",
+    "config": {
+        "allow-plugins": {
+            "composer/installers": true
+        }
+    }
 }
